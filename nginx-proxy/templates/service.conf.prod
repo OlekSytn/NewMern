@@ -1,0 +1,91 @@
+# If no default server is defined, Nginx will use the first found server.
+# To prevent host header attacks, or other potential problems when an unknown
+# server name is used in a request, it's recommended to drop the request
+# returning 444 "No Response".
+
+# Specify file cache expiration.
+include h5bp/web_performance/cache_expiration.conf;
+
+limit_req_zone $binary_remote_addr zone=generallimit:10m rate=10r/s;
+
+upstream client-cluster {
+  server client:3000;
+}
+
+upstream api-server-cluster {
+  server api-server:NGINX_LE_PLACEHOLDER_1;
+}
+
+server {
+  listen 80;
+  listen [::]:80;
+  
+  server_name NGINX_LE_PLACEHOLDER_2;
+
+  return 301 https://NGINX_LE_CN_DOMAIN$request_uri;
+}
+
+# default config for ssl server
+server {
+  listen 443 ssl http2 default_server;
+  listen [::]:443 ssl http2 default_server;
+  
+  server_name _;
+
+  include h5bp/ssl/ssl_engine.conf;
+  include h5bp/ssl/certificate_files.conf;
+  include h5bp/ssl/ocsp_stapling.conf;  
+  include h5bp/ssl/policy_intermediate.conf;
+  
+  return 444;
+}
+
+server {
+  listen 443 ssl http2;
+  listen [::]:443 ssl http2;
+  
+  server_name NGINX_LE_PLACEHOLDER_2;
+  
+  include h5bp/ssl/ssl_engine.conf;
+  include h5bp/ssl/certificate_files.conf;
+  include h5bp/ssl/ocsp_stapling.conf;  
+  include h5bp/ssl/policy_intermediate.conf;
+
+  return 301 https://NGINX_LE_CN_DOMAIN$request_uri;
+}
+
+server {
+  listen 443 ssl http2;
+  listen [::]:443 ssl http2;
+  
+  server_name NGINX_LE_FQDN;
+  
+  include h5bp/ssl/ssl_engine.conf;
+  include h5bp/ssl/certificate_files.conf;
+  include h5bp/ssl/ocsp_stapling.conf;  
+  include h5bp/ssl/policy_intermediate.conf;
+  
+  include h5bp/security/strict-transport-security.conf;
+  include h5bp/basic.conf;
+   
+  # FIXME:
+  #include h5bp/security/content-security-policy.conf;
+
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+  location / {
+    proxy_pass http://client-cluster;
+  }
+
+  location /api {
+    limit_req zone=generallimit burst=20 nodelay;
+    limit_req_status 429;
+    proxy_pass http://api-server-cluster;
+  }
+
+  location /public {
+    proxy_pass http://api-server-cluster;
+  }
+}
